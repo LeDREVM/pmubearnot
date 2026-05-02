@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
 
-// En prod Netlify → /api/pmu-proxy  |  En dev local → proxy Vite
 const API_PROXY = "/api/pmu-proxy";
 
 const DISCIPLINE_COLORS = {
@@ -31,6 +30,21 @@ const formatHeure = (ts) => {
   return `${String(d.getHours()).padStart(2,"0")}h${String(d.getMinutes()).padStart(2,"0")}`;
 };
 
+const isToday = (date) => {
+  const now = new Date();
+  return date.getDate() === now.getDate() &&
+    date.getMonth() === now.getMonth() &&
+    date.getFullYear() === now.getFullYear();
+};
+
+const isTomorrow = (date) => {
+  const tom = new Date();
+  tom.setDate(tom.getDate() + 1);
+  return date.getDate() === tom.getDate() &&
+    date.getMonth() === tom.getMonth() &&
+    date.getFullYear() === tom.getFullYear();
+};
+
 const getStatus = (heureDepart) => {
   const diff = heureDepart - Date.now();
   if (diff < 0 && diff > -3600000) return "live";
@@ -46,20 +60,45 @@ const STATUS_CONFIG = {
   upcoming: { label: "À VENIR",  bg: "#052e16", color: "#4ade80" },
 };
 
+/* ─── MUSIQUE ─────────────────────────────────────────────── */
+function Musique({ musique }) {
+  if (!musique) return null;
+  // Chaque résultat : chiffre = place, p/h/s/c = discipline, () = changement entraîneur
+  const parts = musique.replace(/\([^)]*\)/g, "").trim().split(/(?<=[a-z])/);
+  return (
+    <div style={{ display:"flex", gap:3, flexWrap:"wrap", marginTop:4 }}>
+      {parts.filter(Boolean).slice(0, 10).map((p, i) => {
+        const num = parseInt(p);
+        const color = num === 0 ? "#555"
+          : num === 1 ? "#fbbf24"
+          : num <= 3  ? "#4ade80"
+          : num <= 5  ? "#60a5fa"
+          : "#6b7280";
+        return (
+          <span key={i} style={{
+            fontSize: 9, fontFamily:"monospace",
+            color, fontWeight: num <= 3 ? 700 : 400,
+          }}>{p}</span>
+        );
+      })}
+    </div>
+  );
+}
+
 /* ─── CARD COURSE ─────────────────────────────────────────── */
-function CourseCard({ course, rNum, isQuinte }) {
+function CourseCard({ course, rNum, isQuinte, isTomorrowMode }) {
   const [open, setOpen] = useState(false);
   const [partants, setPartants] = useState(course.participants || null);
   const [loadingP, setLoadingP] = useState(false);
   const disc = getDisciplineStyle(course.discipline);
-  const status = getStatus(course.heureDepart);
+  const status = isTomorrowMode ? "upcoming" : getStatus(course.heureDepart);
   const sc = STATUS_CONFIG[status];
 
   const loadPartants = async () => {
     if (partants || loadingP) return;
     setLoadingP(true);
     try {
-      const dateStr = formatDate(new Date());
+      const dateStr = formatDate(new Date(course.heureDepart || Date.now() + (isTomorrowMode ? 86400000 : 0)));
       const res = await fetch(`${API_PROXY}?date=${dateStr}&reunion=${rNum}&course=${course.numOrdre}`);
       const json = await res.json();
       setPartants(json.participants || json.partants || []);
@@ -72,14 +111,16 @@ function CourseCard({ course, rNum, isQuinte }) {
     if (!open) loadPartants();
   };
 
+  const hasCotes = partants && partants.some(p => p.coteInitiale || p.coteProbable);
+
   return (
     <div
       onClick={toggle}
       style={{
         background: isQuinte
           ? "linear-gradient(135deg,#1a0800,#2a1200)"
-          : "#0f0f0f",
-        border: `1px solid ${isQuinte ? "#f59e0b44" : "#1c1c1c"}`,
+          : isTomorrowMode ? "#080d14" : "#0f0f0f",
+        border: `1px solid ${isQuinte ? "#f59e0b44" : isTomorrowMode ? "#0d2040" : "#1c1c1c"}`,
         borderRadius: 10, padding: "14px 16px",
         cursor: "pointer", position: "relative",
         transition: "border-color 0.2s",
@@ -96,7 +137,6 @@ function CourseCard({ course, rNum, isQuinte }) {
       )}
 
       <div style={{ display:"flex", gap:10, alignItems:"center", flexWrap:"wrap" }}>
-        {/* Badge R/C */}
         <div style={{
           background:"#141414", border:"1px solid #2a2a2a",
           borderRadius:6, padding:"4px 10px",
@@ -104,14 +144,12 @@ function CourseCard({ course, rNum, isQuinte }) {
           fontSize:13, color:"#ddd", whiteSpace:"nowrap",
         }}>R{rNum}C{course.numOrdre}</div>
 
-        {/* Discipline */}
         <div style={{
           background: disc.bg, borderRadius:5,
           padding:"3px 8px", fontSize:11,
           fontWeight:700, color: disc.text,
         }}>{disc.label}</div>
 
-        {/* Nom course */}
         <div style={{ flex:1, minWidth:100 }}>
           <div style={{ fontSize:13, fontWeight:600, color:"#eee", lineHeight:1.2 }}>
             {course.libelle || `Course ${course.numOrdre}`}
@@ -123,7 +161,6 @@ function CourseCard({ course, rNum, isQuinte }) {
           </div>
         </div>
 
-        {/* Heure + Status */}
         <div style={{ textAlign:"right", flexShrink:0 }}>
           <div style={{ fontSize:16, fontWeight:800, color:"#e0e0e0", fontFamily:"monospace" }}>
             {formatHeure(course.heureDepart)}
@@ -147,48 +184,65 @@ function CourseCard({ course, rNum, isQuinte }) {
           )}
           {!loadingP && partants && partants.length > 0 && (
             <>
-              <div style={{ fontSize:10, color:"#444", letterSpacing:1, fontWeight:600, marginBottom:8 }}>
-                PARTANTS ({partants.length})
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+                <div style={{ fontSize:10, color:"#444", letterSpacing:1, fontWeight:600 }}>
+                  PARTANTS ({partants.length})
+                </div>
+                {hasCotes && (
+                  <div style={{ fontSize:9, color:"#3a3a3a" }}>COTE INITIALE</div>
+                )}
+                {!hasCotes && isTomorrowMode && (
+                  <div style={{ fontSize:9, color:"#1a3a1a" }}>cotes non encore publiées</div>
+                )}
               </div>
               <div style={{
-                display:"grid",
-                gridTemplateColumns:"repeat(auto-fill, minmax(155px,1fr))",
-                gap:6,
+                display:"flex", flexDirection:"column", gap:4,
               }}>
-                {partants.map((p) => (
-                  <div key={p.numPmu} style={{
-                    background:"#0a0a0a", border:"1px solid #1a1a1a",
-                    borderRadius:7, padding:"7px 10px",
-                    display:"flex", gap:8, alignItems:"flex-start",
-                  }}>
-                    <span style={{
-                      width:22, height:22, borderRadius:"50%",
-                      background:"#1a1a1a", border:"1px solid #2a2a2a",
-                      display:"flex", alignItems:"center", justifyContent:"center",
-                      fontSize:11, fontWeight:700, color:"#999",
-                      flexShrink:0, fontFamily:"monospace",
-                    }}>{p.numPmu}</span>
-                    <div style={{ flex:1, minWidth:0 }}>
-                      <div style={{
-                        fontSize:12, fontWeight:600, color:"#d0d0d0",
-                        lineHeight:1.2, overflow:"hidden",
-                        textOverflow:"ellipsis", whiteSpace:"nowrap",
-                      }}>
-                        {(p.nom||"").toLowerCase().replace(/\b\w/g,l=>l.toUpperCase())}
-                      </div>
-                      {(p.driver||p.jockey) && (
-                        <div style={{ fontSize:10, color:"#555", marginTop:1 }}>
-                          {((p.driver||p.jockey)||"").toLowerCase().replace(/\b\w/g,l=>l.toUpperCase())}
+                {partants.map((p) => {
+                  const cote = p.coteProbable || p.coteInitiale;
+                  return (
+                    <div key={p.numPmu} style={{
+                      background:"#0a0a0a", border:"1px solid #1a1a1a",
+                      borderRadius:7, padding:"7px 10px",
+                      display:"flex", gap:8, alignItems:"flex-start",
+                    }}>
+                      <span style={{
+                        width:22, height:22, minWidth:22, borderRadius:"50%",
+                        background:"#1a1a1a", border:"1px solid #2a2a2a",
+                        display:"flex", alignItems:"center", justifyContent:"center",
+                        fontSize:11, fontWeight:700, color:"#999",
+                        flexShrink:0, fontFamily:"monospace",
+                      }}>{p.numPmu}</span>
+                      <div style={{ flex:1, minWidth:0 }}>
+                        <div style={{
+                          fontSize:12, fontWeight:600, color:"#d0d0d0",
+                          lineHeight:1.2,
+                        }}>
+                          {(p.nom||"").toLowerCase().replace(/\b\w/g,l=>l.toUpperCase())}
+                          {p.handicapPoids > 0 && (
+                            <span style={{ fontSize:10, color:"#3a3a3a", marginLeft:6, fontWeight:400 }}>
+                              {(p.handicapPoids/10).toFixed(1)}kg
+                            </span>
+                          )}
                         </div>
-                      )}
-                      {p.coteInitiale && (
-                        <div style={{ fontSize:11, color:"#f59e0b", fontWeight:700, marginTop:2 }}>
-                          {p.coteInitiale}
+                        {(p.driver||p.jockey) && (
+                          <div style={{ fontSize:10, color:"#555", marginTop:1 }}>
+                            {((p.driver||p.jockey)||"").toLowerCase().replace(/\b\w/g,l=>l.toUpperCase())}
+                          </div>
+                        )}
+                        <Musique musique={p.musique} />
+                      </div>
+                      {cote && (
+                        <div style={{
+                          fontSize:13, color:"#f59e0b", fontWeight:800,
+                          fontFamily:"monospace", flexShrink:0, alignSelf:"center",
+                        }}>
+                          {cote}
                         </div>
                       )}
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </>
           )}
@@ -206,7 +260,7 @@ function CourseCard({ course, rNum, isQuinte }) {
 }
 
 /* ─── SECTION REUNION ─────────────────────────────────────── */
-function ReunionSection({ reunion }) {
+function ReunionSection({ reunion, isTomorrowMode }) {
   const [open, setOpen] = useState(true);
   const courses = reunion.courses || [];
   const hippo = reunion.hippodrome?.libelleCourt || reunion.hippodrome?.libelleLong || "?";
@@ -219,7 +273,8 @@ function ReunionSection({ reunion }) {
         style={{
           display:"flex", alignItems:"center", gap:12,
           padding:"12px 16px",
-          background:"#0a0a0a", border:"1px solid #161616",
+          background: isTomorrowMode ? "#04080f" : "#0a0a0a",
+          border: `1px solid ${isTomorrowMode ? "#0a1a2a" : "#161616"}`,
           borderRadius:10, cursor:"pointer",
           marginBottom: open ? 8 : 0,
         }}
@@ -249,6 +304,7 @@ function ReunionSection({ reunion }) {
               course={c}
               rNum={reunion.numOfficiel}
               isQuinte={c.categorieParticularite==="QUINTE_PLUS" || c.hasQuintePlus}
+              isTomorrowMode={isTomorrowMode}
             />
           ))}
         </div>
@@ -266,6 +322,10 @@ export default function App() {
   const [filter,      setFilter]      = useState("TOUTES");
   const [lastUpdate,  setLastUpdate]  = useState(null);
 
+  const tomorrow = (() => { const d = new Date(); d.setDate(d.getDate()+1); return d; })();
+  const tomorrowMode = isTomorrow(date);
+  const todayMode    = isToday(date);
+
   const fetchData = useCallback(async (d) => {
     setLoading(true); setError(null);
     try {
@@ -282,10 +342,13 @@ export default function App() {
   }, []);
 
   useEffect(() => { fetchData(date); }, [date, fetchData]);
+
+  // Refresh toutes les 2min aujourd'hui, 5min demain
   useEffect(() => {
-    const t = setInterval(() => fetchData(date), 120000);
+    const interval = tomorrowMode ? 300000 : 120000;
+    const t = setInterval(() => fetchData(date), interval);
     return () => clearInterval(t);
-  }, [date, fetchData]);
+  }, [date, fetchData, tomorrowMode]);
 
   const changeDate = (delta) => {
     const d = new Date(date);
@@ -336,10 +399,11 @@ export default function App() {
 
       {/* ── HEADER STICKY ── */}
       <div style={{
-        background:"#0a0a0a",
-        borderBottom:"1px solid #161616",
+        background: tomorrowMode ? "#020810" : "#0a0a0a",
+        borderBottom:`1px solid ${tomorrowMode ? "#0a1a2a" : "#161616"}`,
         padding:"16px 16px 12px",
         position:"sticky", top:0, zIndex:100,
+        transition:"background 0.3s",
       }}>
         <div style={{ maxWidth:800, margin:"0 auto" }}>
 
@@ -354,7 +418,9 @@ export default function App() {
                 PMU Dashboard
               </div>
               <div style={{ fontSize:10, color:"#333", letterSpacing:0.5 }}>
-                COURSES DU JOUR · AUTO-REFRESH 2MIN
+                {tomorrowMode
+                  ? "PRÉPARATION LENDEMAIN · REFRESH 5MIN"
+                  : "COURSES DU JOUR · AUTO-REFRESH 2MIN"}
               </div>
             </div>
             <div style={{ display:"flex", gap:8, alignItems:"center" }}>
@@ -362,7 +428,7 @@ export default function App() {
                 <div style={{
                   width:16, height:16,
                   border:"2px solid #222",
-                  borderTop:"2px solid #dc2626",
+                  borderTop:`2px solid ${tomorrowMode ? "#3b82f6" : "#dc2626"}`,
                   borderRadius:"50%",
                   animation:"spin 0.7s linear infinite",
                 }}/>
@@ -379,7 +445,7 @@ export default function App() {
             </div>
           </div>
 
-          {/* Nav date */}
+          {/* Nav date + raccourcis */}
           <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:12 }}>
             <button onClick={() => changeDate(-1)} style={{
               background:"#141414", border:"1px solid #1f1f1f",
@@ -388,11 +454,42 @@ export default function App() {
               fontSize:16, display:"flex",
               alignItems:"center", justifyContent:"center",
             }}>‹</button>
+
+            {/* Raccourcis Aujourd'hui / Demain */}
+            <div style={{ display:"flex", gap:5 }}>
+              <button
+                onClick={() => setDate(new Date())}
+                style={{
+                  background: todayMode ? "#dc2626" : "#141414",
+                  border:`1px solid ${todayMode ? "#dc2626" : "#1f1f1f"}`,
+                  color: todayMode ? "#fff" : "#555",
+                  borderRadius:6, padding:"5px 11px",
+                  cursor:"pointer", fontSize:11, fontWeight:700,
+                  letterSpacing:0.3,
+                }}
+              >Aujourd'hui</button>
+              <button
+                onClick={() => setDate(tomorrow)}
+                style={{
+                  background: tomorrowMode ? "#1d4ed8" : "#141414",
+                  border:`1px solid ${tomorrowMode ? "#1d4ed8" : "#1f1f1f"}`,
+                  color: tomorrowMode ? "#fff" : "#555",
+                  borderRadius:6, padding:"5px 11px",
+                  cursor:"pointer", fontSize:11, fontWeight:700,
+                  letterSpacing:0.3,
+                }}
+              >Demain →</button>
+            </div>
+
             <div style={{
               flex:1, textAlign:"center",
-              fontSize:13, fontWeight:600, color:"#bbb",
-              textTransform:"capitalize",
-            }}>{dateLabel}</div>
+              fontSize:12, fontWeight:600, color:"#666",
+              textTransform:"capitalize", display:"flex",
+              flexDirection:"column", alignItems:"center",
+            }}>
+              <span style={{ color: tomorrowMode ? "#3b82f6" : "#bbb" }}>{dateLabel}</span>
+            </div>
+
             <button onClick={() => changeDate(1)} style={{
               background:"#141414", border:"1px solid #1f1f1f",
               color:"#777", borderRadius:7,
@@ -401,6 +498,22 @@ export default function App() {
               alignItems:"center", justifyContent:"center",
             }}>›</button>
           </div>
+
+          {/* Bannière demain */}
+          {tomorrowMode && (
+            <div style={{
+              background:"#0a1628", border:"1px solid #1a3a6a",
+              borderRadius:8, padding:"8px 14px",
+              fontSize:12, color:"#60a5fa",
+              marginBottom:12, display:"flex", alignItems:"center", gap:8,
+            }}>
+              <span style={{ fontSize:16 }}>🔭</span>
+              <span>
+                <strong>Mode Préparation</strong> — Programme du lendemain.
+                Les cotes seront publiées en soirée. Refresh automatique toutes les 5 min.
+              </span>
+            </div>
+          )}
 
           {/* Stats */}
           {!loading && !error && reunions.length > 0 && (
@@ -428,13 +541,13 @@ export default function App() {
             </div>
           )}
 
-          {/* Filtres */}
+          {/* Filtres discipline */}
           {disciplines.length > 2 && (
             <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
               {disciplines.map(d => (
                 <button key={d} onClick={() => setFilter(d)} style={{
-                  background: filter===d ? "#dc2626" : "#0d0d0d",
-                  border:`1px solid ${filter===d ? "#dc2626" : "#1c1c1c"}`,
+                  background: filter===d ? (tomorrowMode ? "#1d4ed8" : "#dc2626") : "#0d0d0d",
+                  border:`1px solid ${filter===d ? (tomorrowMode ? "#1d4ed8" : "#dc2626") : "#1c1c1c"}`,
                   color: filter===d ? "#fff" : "#444",
                   borderRadius:5, padding:"4px 10px",
                   cursor:"pointer", fontSize:11, fontWeight:600,
@@ -472,12 +585,14 @@ export default function App() {
             <div style={{
               width:36, height:36,
               border:"3px solid #1a1a1a",
-              borderTop:"3px solid #dc2626",
+              borderTop:`3px solid ${tomorrowMode ? "#3b82f6" : "#dc2626"}`,
               borderRadius:"50%",
               animation:"spin 0.8s linear infinite",
               margin:"0 auto 14px",
             }}/>
-            <div style={{ color:"#333", fontSize:13 }}>Chargement des courses…</div>
+            <div style={{ color:"#333", fontSize:13 }}>
+              {tomorrowMode ? "Chargement du programme demain…" : "Chargement des courses…"}
+            </div>
           </div>
         )}
 
@@ -489,7 +604,11 @@ export default function App() {
         )}
 
         {filtered.map(r => (
-          <ReunionSection key={r.numOfficiel} reunion={r} />
+          <ReunionSection
+            key={r.numOfficiel}
+            reunion={r}
+            isTomorrowMode={tomorrowMode}
+          />
         ))}
 
         {lastUpdate && (
