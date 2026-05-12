@@ -1,6 +1,6 @@
-# 🏇 PMU Dashboard — Netlify
+# 🏇 PMU Dashboard — 
 
-Dashboard temps réel des courses PMU avec proxy serverless Netlify.
+Dashboard temps réel des courses PMU .
 
 ## Stack
 - React 18 + Vite
@@ -29,19 +29,8 @@ netlify deploy --build --prod  # deploy production
 2. Netlify → "Add new site" → "Import from Git"
 3. Build command : `npm run build`
 4. Publish directory : `dist`
-5. Le `netlify.toml` gère tout le reste ✅
-
-## Dev local
-```bash
-npm install
-netlify dev   # lance Vite + Functions en local sur :8888
-```
-
+5. Le `netlify.toml` gère tout le reste 
 ## Architecture
-```
-/api/pmu-proxy?date=25042026            → programme du jour
-/api/pmu-proxy?date=25042026&reunion=2  → réunion R2
-/api/pmu-proxy?date=25042026&reunion=2&course=1  → partants R2C1
 ```
 
 ## Notes
